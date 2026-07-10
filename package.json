@@ -1,0 +1,22 @@
+{
+  "name": "swot-controle-licencas",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistema de Controle de Licencas e Autorizacoes - Swot",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "migrate": "node migrate.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "postgres": "^3.4.4",
+    "nodemailer": "^6.9.14",
+    "node-cron": "^3.0.3",
+    "pdf-parse": "^1.1.1"
+  }
+}

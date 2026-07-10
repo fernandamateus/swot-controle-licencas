@@ -1,0 +1,53 @@
+name: swot-controle-licencas
+region: nyc
+
+services:
+  - name: web
+    github:
+      repo: fernandamateus/swot-controle-licencas
+      branch: main
+      deploy_on_push: true
+    build_command: npm install --production
+    run_command: npm start
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    instance_count: 1
+    http_port: 8080
+    health_check:
+      http_path: /api/me
+      initial_delay_seconds: 30
+      period_seconds: 30
+    envs:
+      - key: SESSION_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMTP_USER
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMTP_APP_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMTP_HOST
+        scope: RUN_TIME
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        scope: RUN_TIME
+        value: "465"
+      - key: SMTP_FROM_NAME
+        scope: RUN_TIME
+        value: "Swot - Controle de Licencas"
+      - key: ANTHROPIC_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: ANTHROPIC_MODEL
+        scope: RUN_TIME
+        value: claude-haiku-4-5-20251001
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${swot-db.DATABASE_URL}
+
+databases:
+  - name: swot-db
+    engine: PG
+    version: "16"
+    size: db-s-dev-database
+    num_nodes: 1

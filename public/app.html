@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Swot · Controle de Licenças</title>
+<link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">Swot<small>Controle de Licenças</small></div>
+    <nav id="nav">
+      <button data-view="dashboard" class="active">Painel de Alertas</button>
+      <button data-view="clientes">Clientes</button>
+      <button data-view="licencas">Licenças</button>
+      <button data-view="emails">Central de E-mails</button>
+      <button data-view="legislacao">Legislação</button>
+      <button data-view="usuarios" id="nav-usuarios" style="display:none;">Usuários</button>
+    </nav>
+    <div class="user-box">
+      <div class="name" id="user-name">-</div>
+      <div class="role" id="user-role">-</div>
+      <button id="btn-change-password">Alterar minha senha</button>
+      <button id="btn-logout">Sair</button>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <section class="view active" id="view-dashboard">
+      <h2>Painel de Alertas</h2>
+      <p class="page-sub">Visão geral de vencimentos e prazos de renovação de licenças.</p>
+
+      <div class="cards-row" id="dash-cards"></div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Licenças por situação</h3>
+          <div class="toolbar">
+            <input type="text" id="dash-search" placeholder="Buscar por descrição, número ou cliente..." />
+            <select id="dash-filtro-nivel">
+              <option value="">Todas as situações</option>
+              <option value="vencido">Vencidas</option>
+              <option value="critico">Críticas (≤15 dias)</option>
+              <option value="atencao">Atenção (≤30 dias)</option>
+              <option value="alerta">Renovar (dentro do prazo)</option>
+              <option value="ok">Em dia</option>
+            </select>
+          </div>
+        </div>
+        <div id="dash-table-wrap"></div>
+      </div>
+    </section>
+
+    <!-- ===================== CLIENTES ===================== -->
+    <section class="view" id="view-clientes">
+      <h2>Clientes</h2>
+      <p class="page-sub">Cadastro de clientes, licenças exigidas e contatos para envio de e-mails.</p>
+
+      <div class="panel" id="clientes-list-panel">
+        <div class="panel-head">
+          <h3>Clientes cadastrados</h3>
+          <div class="toolbar">
+            <input type="text" id="clientes-search" placeholder="Buscar cliente ou CNPJ..." />
+            <button class="btn-primary" id="btn-novo-cliente">+ Novo cliente</button>
+          </div>
+        </div>
+        <div id="clientes-table-wrap"></div>
+      </div>
+
+      <div class="panel" id="cliente-detalhe-panel" style="display:none;">
+        <div class="panel-head">
+          <h3 id="cliente-detalhe-titulo">Cliente</h3>
+          <div class="toolbar">
+            <button class="btn-secondary" id="btn-editar-cliente">Editar</button>
+            <button class="btn-ghost" id="btn-fechar-cliente">‹ Voltar para a lista</button>
+          </div>
+        </div>
+        <div id="cliente-detalhe-conteudo"></div>
+      </div>
+    </section>
+
+    <!-- ===================== LICENÇAS ===================== -->
+    <section class="view" id="view-licencas">
+      <h2>Licenças e Autorizações</h2>
+      <p class="page-sub">Cadastro manual ou por leitura automática de documentos (IA).</p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Todas as licenças</h3>
+          <div class="toolbar">
+            <input type="text" id="lic-search" placeholder="Buscar..." />
+            <button class="btn-secondary" id="btn-nova-licenca-manual">+ Cadastrar manualmente</button>
+            <button class="btn-primary" id="btn-nova-licenca-ia">📎 Anexar licença</button>
+          </div>
+        </div>
+        <div id="lic-table-wrap"></div>
+      </div>
+    </section>
+
+    <!-- ===================== E-MAILS ===================== -->
+    <section class="view" id="view-emails">
+      <h2>Central de E-mails</h2>
+      <p class="page-sub">Histórico de e-mails enviados aos clientes (renovação, guias e licenças renovadas).</p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Envios recentes</h3>
+          <button class="btn-secondary" id="btn-refresh-emails">Atualizar</button>
+        </div>
+        <div id="email-log-table-wrap"></div>
+      </div>
+    </section>
+
+    <!-- ===================== LEGISLAÇÃO ===================== -->
+    <section class="view" id="view-legislacao">
+      <h2>Atualizações de Legislação</h2>
+      <p class="page-sub">Mudanças em normas e legislações que podem exigir ação.</p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Comunicados</h3>
+          <button class="btn-primary" id="btn-nova-legislacao" style="display:none;">+ Novo comunicado</button>
+        </div>
+        <div id="legislacao-list-wrap"></div>
+      </div>
+    </section>
+
+    <!-- ===================== USUÁRIOS (admin) ===================== -->
+    <section class="view" id="view-usuarios">
+      <h2>Usuários do Sistema</h2>
+      <p class="page-sub">Gerencie os logins de acesso.</p>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Usuários</h3></div>
+        <div id="usuarios-table-wrap"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ===================== MODAIS ===================== -->
+
+<div class="modal-overlay" id="modal-legis-banner">
+  <div class="modal wide">
+    <h3>📋 Atualizações de legislação não lidas</h3>
+    <div id="legis-banner-list"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="btn-legis-banner-depois">Ver depois</button>
+      <button class="btn-primary" id="btn-legis-banner-ok">Marcar todas como lidas</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-change-password">
+  <div class="modal">
+    <h3 id="change-password-title">Alterar senha</h3>
+    <form id="form-change-password">
+      <div class="field" id="field-current-password">
+        <label>Senha atual</label>
+        <input type="password" id="cp-current" autocomplete="current-password" />
+      </div>
+      <div class="field">
+        <label>Nova senha (mín. 8 caracteres)</label>
+        <input type="password" id="cp-new" autocomplete="new-password" required minlength="8" />
+      </div>
+      <div class="field">
+        <label>Confirmar nova senha</label>
+        <input type="password" id="cp-confirm" autocomplete="new-password" required minlength="8" />
+      </div>
+      <div class="login-error" id="cp-error" style="display:none;"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" id="btn-cp-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">Salvar nova senha</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-cliente">
+  <div class="modal">
+    <h3 id="modal-cliente-titulo">Novo cliente</h3>
+    <form id="form-cliente">
+      <input type="hidden" id="cli-id" />
+      <div class="field">
+        <label>Nome / Razão social *</label>
+        <input type="text" id="cli-nome" required />
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>CNPJ</label>
+          <input type="text" id="cli-cnpj" placeholder="00.000.000/0000-00" />
+        </div>
+        <div class="field">
+          <label>Status</label>
+          <select id="cli-status">
+            <option value="ativo">Ativo</option>
+            <option value="inativo">Inativo</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Observações</label>
+        <textarea id="cli-obs" rows="3"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" id="btn-cliente-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-contato">
+  <div class="modal">
+    <h3>Novo contato de e-mail</h3>
+    <form id="form-contato">
+      <div class="field">
+        <label>Nome</label>
+        <input type="text" id="contato-nome" />
+      </div>
+      <div class="field">
+        <label>E-mail *</label>
+        <input type="email" id="contato-email" required />
+      </div>
+      <div class="field">
+        <label><input type="checkbox" id="contato-receber" checked style="width:auto;display:inline-block;margin-right:6px;" />Receber alertas automáticos por e-mail</label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" id="btn-contato-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">Adicionar contato</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-licenca">
+  <div class="modal wide">
+    <h3 id="modal-licenca-titulo">Cadastrar licença</h3>
+
+    <div id="lic-upload-area">
+      <div class="field">
+        <label>Documento da licença (PDF, PNG ou JPG)</label>
+        <div class="upload-drop" id="lic-upload-drop">Clique para escolher o arquivo, ou arraste aqui<br /><span class="muted">Após selecionar, você escolhe se quer apenas anexar ou ler os campos automaticamente</span></div>
+        <input type="file" id="lic-file-input" accept=".pdf,.png,.jpg,.jpeg,.webp" style="display:none;" />
+      </div>
+      <div id="lic-file-actions" style="display:none; margin-top:8px;">
+        <p id="lic-file-name" class="muted" style="margin-bottom:8px;"></p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <button type="button" class="btn-secondary" id="btn-apenas-anexar">📎 Apenas Anexar</button>
+          <button type="button" class="btn-primary"   id="btn-ler-campos">🔍 Ler campos automaticamente (grátis)</button>
+          <button type="button" class="btn-secondary" id="btn-preview-arquivo" title="Abrir arquivo para visualizar">👁 Visualizar arquivo</button>
+        </div>
+      </div>
+      <p class="muted" id="lic-upload-status" style="margin-top:8px;"></p>
+      <hr class="sep" />
+    </div>
+
+    <form id="form-licenca">
+      <input type="hidden" id="lic-id" />
+      <div class="field">
+        <label>Cliente *</label>
+        <select id="lic-cliente" required></select>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Classe</label>
+          <select id="lic-classe">
+            <option value="">-</option>
+            <option>Licença Transporte</option>
+            <option>Requisitos Legais</option>
+            <option>Certificação</option>
+            <option>Transporte</option>
+            <option>Outro</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Unidade</label>
+          <input type="text" id="lic-unidade" />
+        </div>
+      </div>
+      <div class="field">
+        <label>Descrição do documento *</label>
+        <input type="text" id="lic-descricao" required placeholder="ex.: CERTIFICADO DE REGULARIDADE - CR" />
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Número</label>
+          <input type="text" id="lic-numero" />
+        </div>
+        <div class="field">
+          <label>Órgão expedidor</label>
+          <input type="text" id="lic-orgao" />
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Emissão</label>
+          <input type="date" id="lic-emissao" />
+        </div>
+        <div class="field">
+          <label>Validade</label>
+          <input type="date" id="lic-validade" />
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Responsável</label>
+          <input type="text" id="lic-responsavel" />
+        </div>
+        <div class="field">
+          <label>Iniciar alerta de renovação (dias antes do vencimento)</label>
+          <input type="number" id="lic-lead" value="60" min="1" />
+        </div>
+      </div>
+      <div class="field">
+        <label>Informações adicionais</label>
+        <textarea id="lic-info" rows="2"></textarea>
+      </div>
+      <div class="field">
+        <label><input type="checkbox" id="lic-auto-aviso" style="width:auto;display:inline-block;margin-right:6px;" />Enviar avisos automáticos de renovação por e-mail aos contatos do cliente</label>
+      </div>
+      <div class="login-error" id="lic-error" style="display:none;"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" id="btn-licenca-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary" id="btn-licenca-salvar">Salvar licença</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-enviar-email">
+  <div class="modal wide">
+    <h3>Enviar e-mail ao cliente</h3>
+    <form id="form-enviar-email">
+      <input type="hidden" id="email-license-id" />
+      <div class="field">
+        <label>Tipo de e-mail</label>
+        <select id="email-tipo">
+          <option value="aviso_renovacao">Aviso de necessidade de renovação</option>
+          <option value="envio_guias">Envio de guias</option>
+          <option value="licenca_renovada">Licença renovada</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Destinatários</label>
+        <div id="email-destinatarios-list" class="tag-list"></div>
+        <p class="muted" id="email-destinatarios-empty" style="display:none;">Este cliente não tem contatos de e-mail cadastrados. Cadastre em Clientes › Contatos.</p>
+      </div>
+      <div class="field">
+        <label><input type="checkbox" id="email-anexar-original" style="width:auto;display:inline-block;margin-right:6px;" />Anexar documento original da licença (se houver)</label>
+      </div>
+      <div class="field">
+        <label>Anexo extra (opcional — ex.: guia ou licença renovada em PDF)</label>
+        <input type="file" id="email-anexo-extra" accept=".pdf,.png,.jpg,.jpeg" />
+      </div>
+      <div class="login-error" id="email-error" style="display:none;"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" id="btn-email-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary" id="btn-email-enviar">Enviar e-mail</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-legislacao-nova">
+  <div class="modal">
+    <h3>Novo comunicado de legislação</h3>
+    <form id="form-legislacao-nova">
+      <div class="field">
+        <label>Título *</label>
+        <input type="text" id="legis-titulo" required />
+      </div>
+      <div class="field">
+        <label>Descrição</label>
+        <textarea id="legis-descricao" rows="3"></textarea>
+      </div>
+      <div class="field">
+        <label>Link (opcional)</label>
+        <input type="text" id="legis-link" placeholder="https://..." />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" id="btn-legislacao-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">Publicar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-reset-senha">
+  <div class="modal">
+    <h3>Redefinir senha do usuário</h3>
+    <form id="form-reset-senha">
+      <input type="hidden" id="reset-user-id" />
+      <p class="muted" id="reset-user-nome"></p>
+      <div class="field">
+        <label>Nova senha (mín. 8 caracteres)</label>
+        <input type="password" id="reset-nova-senha" required minlength="8" />
+      </div>
+      <p class="muted">O usuário será obrigado a trocar a senha no próximo login.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" id="btn-reset-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">Redefinir senha</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
