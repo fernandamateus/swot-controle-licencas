@@ -3,7 +3,6 @@ const auth = require('../../lib/auth');
 const { json, parseBody } = require('../../lib/http');
 const { sendMail, TEMPLATES, formatDate } = require('../../lib/mailer');
 const { computeAlert } = require('../../lib/license-utils');
-const { documentsStore } = require('../../lib/blobs');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Metodo nao permitido' });
@@ -41,9 +40,11 @@ exports.handler = async (event) => {
     const html = corpoCustom || template.html(ctx);
 
     const attachments = [];
-    if (anexarDocumentoOriginal && lic.documento_blob_key) {
-      const buf = await documentsStore().get(lic.documento_blob_key, { type: 'arrayBuffer' });
-      if (buf) attachments.push({ filename: lic.documento_nome || 'documento.pdf', content: Buffer.from(buf) });
+    if (anexarDocumentoOriginal) {
+      const docRows = await sql.sql`SELECT documento_data, documento_nome FROM licenses WHERE id = ${licenseId}`;
+      if (docRows[0] && docRows[0].documento_data) {
+        attachments.push({ filename: docRows[0].documento_nome || 'documento.pdf', content: Buffer.from(docRows[0].documento_data) });
+      }
     }
     if (anexoExtra && anexoExtra.base64 && anexoExtra.filename) {
       attachments.push({ filename: anexoExtra.filename, content: Buffer.from(anexoExtra.base64, 'base64') });

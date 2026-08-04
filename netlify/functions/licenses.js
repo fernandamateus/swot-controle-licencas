@@ -2,7 +2,6 @@ const { db } = require('../../lib/db');
 const auth = require('../../lib/auth');
 const { json, parseBody, pathSegmentsAfter } = require('../../lib/http');
 const { computeAlert } = require('../../lib/license-utils');
-const { documentsStore } = require('../../lib/blobs');
 
 function withAlert(row) {
   const alert = computeAlert(row.validade, row.renovacao_lead_days);
@@ -22,8 +21,13 @@ exports.handler = async (event) => {
       if (method === 'GET') {
         const qp = event.queryStringParameters || {};
         const rows = await sql.sql`
-          SELECT l.*, c.name AS cliente_nome, c.cnpj AS cliente_cnpj
+          SELECT l.id, l.client_id, l.cnpj_id, l.classe, l.unidade, l.descricao, l.numero, l.orgao_expeditor,
+            l.responsavel, l.emissao, l.validade, l.renovacao_lead_days, l.status, l.info_adicional,
+            l.documento_nome, l.documento_mime, l.auto_enviar_aviso, l.created_at, l.updated_at,
+            c.name AS cliente_nome, c.cnpj AS cliente_cnpj,
+            cc.cnpj AS licenca_cnpj, cc.apelido AS licenca_cnpj_apelido
           FROM licenses l JOIN clients c ON c.id = l.client_id
+          LEFT JOIN client_cnpjs cc ON cc.id = l.cnpj_id
           ORDER BY l.validade ASC NULLS LAST
         `;
         let result = rows.map(withAlert);
@@ -43,23 +47,33 @@ exports.handler = async (event) => {
         const b = parseBody(event);
         if (!b.clientId || !b.descricao) return json(400, { error: 'Informe ao menos cliente e descricao do documento.' });
 
-        let blobKey = null;
-        let blobName = null;
+        let documentoData = null;
+        let documentoMime = null;
+        let documentoNome = null;
         if (b.documentoBase64 && b.documentoNomeOriginal) {
-          blobKey = `${b.clientId}/${Date.now()}-${b.documentoNomeOriginal}`.replace(/[^a-zA-Z0-9/_.-]/g, '_');
-          const buffer = Buffer.from(b.documentoBase64, 'base64');
-          await documentsStore().set(blobKey, buffer);
-          blobName = b.documentoNomeOriginal;
+          documentoData = Buffer.from(b.documentoBase64, 'base64');
+          documentoMime = b.documentoMime || 'application/octet-stream';
+          documentoNome = b.documentoNomeOriginal;
+        }
+
+        // Se um cnpjId foi informado, garante que ele pertence ao cliente selecionado.
+        let cnpjId = b.cnpjId ? Number(b.cnpjId) : null;
+        if (cnpjId) {
+          const cnpjCheck = await sql.sql`SELECT id FROM client_cnpjs WHERE id = ${cnpjId} AND client_id = ${b.clientId}`;
+          if (!cnpjCheck[0]) cnpjId = null;
         }
 
         const rows = await sql.sql`
-          INSERT INTO licenses (client_id, classe, unidade, descricao, numero, orgao_expeditor, responsavel,
-            emissao, validade, renovacao_lead_days, info_adicional, documento_blob_key, documento_nome, auto_enviar_aviso)
-          VALUES (${b.clientId}, ${b.classe || null}, ${b.unidade || null}, ${b.descricao}, ${b.numero || null},
+          INSERT INTO licenses (client_id, cnpj_id, classe, unidade, descricao, numero, orgao_expeditor, responsavel,
+            emissao, validade, renovacao_lead_days, info_adicional, documento_data, documento_mime,
+            documento_nome, auto_enviar_aviso)
+          VALUES (${b.clientId}, ${cnpjId}, ${b.classe || null}, ${b.unidade || null}, ${b.descricao}, ${b.numero || null},
             ${b.orgaoExpeditor || null}, ${b.responsavel || null}, ${b.emissao || null}, ${b.validade || null},
-            ${b.renovacaoLeadDays || 60}, ${b.infoAdicional || null}, ${blobKey},
-            ${blobName}, ${!!b.autoEnviarAviso})
-          RETURNING *
+            ${b.renovacaoLeadDays || 60}, ${b.infoAdicional || null}, ${documentoData}, ${documentoMime},
+            ${documentoNome}, ${!!b.autoEnviarAviso})
+          RETURNING id, client_id, cnpj_id, classe, unidade, descricao, numero, orgao_expeditor, responsavel,
+            emissao, validade, renovacao_lead_days, status, info_adicional, documento_nome, documento_mime,
+            auto_enviar_aviso, created_at, updated_at
         `;
         return json(201, { license: withAlert(rows[0]) });
       }
@@ -72,16 +86,48 @@ exports.handler = async (event) => {
     if (segments.length === 1) {
       if (method === 'GET') {
         const rows = await sql.sql`
-          SELECT l.*, c.name AS cliente_nome, c.cnpj AS cliente_cnpj
-          FROM licenses l JOIN clients c ON c.id = l.client_id WHERE l.id = ${licenseId}
+          SELECT l.id, l.client_id, l.cnpj_id, l.classe, l.unidade, l.descricao, l.numero, l.orgao_expeditor,
+            l.responsavel, l.emissao, l.validade, l.renovacao_lead_days, l.status, l.info_adicional,
+            l.documento_nome, l.documento_mime, l.auto_enviar_aviso, l.created_at, l.updated_at,
+            c.name AS cliente_nome, c.cnpj AS cliente_cnpj,
+            cc.cnpj AS licenca_cnpj, cc.apelido AS licenca_cnpj_apelido
+          FROM licenses l JOIN clients c ON c.id = l.client_id
+          LEFT JOIN client_cnpjs cc ON cc.id = l.cnpj_id
+          WHERE l.id = ${licenseId}
         `;
         if (!rows[0]) return json(404, { error: 'Licenca nao encontrada' });
         return json(200, { license: withAlert(rows[0]) });
       }
       if (method === 'PUT') {
         const b = parseBody(event);
+
+        if (b.documentoBase64 && b.documentoNomeOriginal) {
+          const documentoData = Buffer.from(b.documentoBase64, 'base64');
+          const documentoMime = b.documentoMime || 'application/octet-stream';
+          await sql.sql`
+            UPDATE licenses SET
+              documento_data = ${documentoData}, documento_mime = ${documentoMime},
+              documento_nome = ${b.documentoNomeOriginal}, updated_at = NOW()
+            WHERE id = ${licenseId}
+          `;
+        }
+
+        // cnpjId pode vir explicitamente como null (para "desvincular" o CNPJ) ou omitido (nao mexe).
+        let cnpjIdUpdate = undefined;
+        if (b.cnpjId !== undefined) {
+          if (b.cnpjId === null || b.cnpjId === '') {
+            cnpjIdUpdate = null;
+          } else {
+            const currentClientRows = await sql.sql`SELECT client_id FROM licenses WHERE id = ${licenseId}`;
+            const targetClientId = b.clientId || (currentClientRows[0] && currentClientRows[0].client_id);
+            const cnpjCheck = await sql.sql`SELECT id FROM client_cnpjs WHERE id = ${Number(b.cnpjId)} AND client_id = ${targetClientId}`;
+            cnpjIdUpdate = cnpjCheck[0] ? Number(b.cnpjId) : null;
+          }
+        }
+
         const rows = await sql.sql`
           UPDATE licenses SET
+            cnpj_id = ${cnpjIdUpdate !== undefined ? cnpjIdUpdate : sql.sql`cnpj_id`},
             classe = COALESCE(${b.classe}, classe),
             unidade = COALESCE(${b.unidade}, unidade),
             descricao = COALESCE(${b.descricao}, descricao),
@@ -92,12 +138,13 @@ exports.handler = async (event) => {
             validade = COALESCE(${b.validade}, validade),
             renovacao_lead_days = COALESCE(${b.renovacaoLeadDays}, renovacao_lead_days),
             info_adicional = COALESCE(${b.infoAdicional}, info_adicional),
-            documento_blob_key = COALESCE(${b.documentoBlobKey}, documento_blob_key),
-            documento_nome = COALESCE(${b.documentoNome}, documento_nome),
             auto_enviar_aviso = COALESCE(${b.autoEnviarAviso}, auto_enviar_aviso),
             status = COALESCE(${b.status}, status),
             updated_at = NOW()
-          WHERE id = ${licenseId} RETURNING *
+          WHERE id = ${licenseId}
+          RETURNING id, client_id, cnpj_id, classe, unidade, descricao, numero, orgao_expeditor, responsavel,
+            emissao, validade, renovacao_lead_days, status, info_adicional, documento_nome, documento_mime,
+            auto_enviar_aviso, created_at, updated_at
         `;
         if (!rows[0]) return json(404, { error: 'Licenca nao encontrada' });
         return json(200, { license: withAlert(rows[0]) });
@@ -110,19 +157,16 @@ exports.handler = async (event) => {
     }
 
     if (segments[1] === 'document' && method === 'GET') {
-      const rows = await sql.sql`SELECT documento_blob_key, documento_nome FROM licenses WHERE id = ${licenseId}`;
+      const rows = await sql.sql`SELECT documento_data, documento_nome, documento_mime FROM licenses WHERE id = ${licenseId}`;
       const lic = rows[0];
-      if (!lic || !lic.documento_blob_key) return json(404, { error: 'Documento nao encontrado' });
-      const store = documentsStore();
-      const blob = await store.get(lic.documento_blob_key, { type: 'arrayBuffer' });
-      if (!blob) return json(404, { error: 'Arquivo nao encontrado no armazenamento' });
+      if (!lic || !lic.documento_data) return json(404, { error: 'Documento nao encontrado' });
       return {
         statusCode: 200,
         headers: {
-          'Content-Type': 'application/octet-stream',
+          'Content-Type': lic.documento_mime || 'application/octet-stream',
           'Content-Disposition': `inline; filename="${(lic.documento_nome || 'documento').replace(/"/g, '')}"`,
         },
-        body: Buffer.from(blob).toString('base64'),
+        body: Buffer.from(lic.documento_data).toString('base64'),
         isBase64Encoded: true,
       };
     }

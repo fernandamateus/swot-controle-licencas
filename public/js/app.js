@@ -104,12 +104,14 @@
       <table>
         <thead><tr>
           ${opts.hideCliente ? '' : '<th>Cliente</th>'}
+          <th>CNPJ</th>
           <th>Descrição</th><th>Número</th><th>Órgão</th><th>Validade</th><th>Situação</th><th></th>
         </tr></thead>
         <tbody>
           ${rows.map((r) => `
             <tr>
               ${opts.hideCliente ? '' : `<td>${escapeHtml(r.cliente_nome || '')}</td>`}
+              <td>${r.licenca_cnpj ? `${r.licenca_cnpj_apelido ? escapeHtml(r.licenca_cnpj_apelido) + '<br>' : ''}<span class="muted">${escapeHtml(r.licenca_cnpj)}</span>` : '-'}</td>
               <td>${escapeHtml(r.descricao || '')}</td>
               <td>${escapeHtml(r.numero || '-')}</td>
               <td>${escapeHtml(r.orgao_expeditor || '-')}</td>
@@ -238,6 +240,12 @@
 
     const licRows = data.licenses.map((r) => ({ ...r, ...computeAlertClient(r) }));
     const requiredTags = data.requiredLicenses.map((rl) => `<span class="tag">${escapeHtml(rl.tipo)} <button data-action="del-req" data-id="${rl.id}" style="border:none;background:none;color:#c4302b;cursor:pointer;font-weight:700;">×</button></span>`).join(' ');
+    const cnpjRows = (data.cnpjs || []).map((cn) => `
+      <tr>
+        <td>${escapeHtml(cn.apelido || '-')}</td>
+        <td>${escapeHtml(cn.cnpj)}</td>
+        <td><button class="btn-danger btn-sm" data-action="del-cnpj" data-id="${cn.id}">Remover</button></td>
+      </tr>`).join('');
     const contactsRows = data.contacts.map((ct) => `
       <tr>
         <td>${escapeHtml(ct.nome || '-')}</td>
@@ -253,6 +261,10 @@
       <hr class="sep" />
       <div class="panel-head"><h3>Licenças exigidas</h3><button class="btn-secondary btn-sm" data-action="add-req">+ Adicionar</button></div>
       <div class="tag-list">${requiredTags || '<span class="muted">Nenhuma licença obrigatória cadastrada.</span>'}</div>
+
+      <hr class="sep" />
+      <div class="panel-head"><h3>CNPJs do cliente</h3><button class="btn-secondary btn-sm" data-action="add-cnpj">+ Adicionar CNPJ</button></div>
+      ${(data.cnpjs || []).length ? `<table><thead><tr><th>Identificação</th><th>CNPJ</th><th></th></tr></thead><tbody>${cnpjRows}</tbody></table>` : '<p class="muted">Nenhum CNPJ adicional cadastrado. Cadastre aqui os CNPJs deste cliente para poder vinculá-los às licenças.</p>'}
 
       <hr class="sep" />
       <div class="panel-head"><h3>Contatos de e-mail</h3><button class="btn-secondary btn-sm" data-action="add-contato">+ Adicionar</button></div>
@@ -285,8 +297,25 @@
       await Api.post(`/clients/${clientId}/required-licenses`, { tipo });
       openClientDetail(clientId);
     });
+    $('#cliente-detalhe-conteudo').querySelectorAll('[data-action="del-cnpj"]').forEach((el) => {
+      el.addEventListener('click', async () => {
+        if (!confirm('Remover este CNPJ? Licenças vinculadas a ele ficarão sem CNPJ específico.')) return;
+        await Api.del(`/clients/${clientId}/cnpjs/${el.dataset.id}`);
+        showToast('CNPJ removido.', 'success');
+        openClientDetail(clientId);
+      });
+    });
+    const addCnpjBtn = $('#cliente-detalhe-conteudo').querySelector('[data-action="add-cnpj"]');
+    if (addCnpjBtn) addCnpjBtn.addEventListener('click', () => openCnpjModal(clientId));
     const addContatoBtn = $('#cliente-detalhe-conteudo').querySelector('[data-action="add-contato"]');
     if (addContatoBtn) addContatoBtn.addEventListener('click', () => openContatoModal(clientId));
+  }
+
+  function openCnpjModal(clientId) {
+    state.currentClientId = clientId;
+    $('#cnpj-valor').value = '';
+    $('#cnpj-apelido').value = '';
+    openModal('modal-cnpj');
   }
 
   function computeAlertClient(r) { return { nivel: r.nivel, diasParaVencer: r.diasParaVencer }; }
@@ -333,7 +362,32 @@
     bindLicenseTableActions(wrap);
   }
 
-  function openLicenseModal(licenseId) {
+  async function updateLicCnpjOptions(clientId, selectedCnpjId) {
+    const sel = $('#lic-cnpj');
+    if (!clientId) {
+      sel.innerHTML = '<option value="">Selecione o cliente primeiro</option>';
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    sel.innerHTML = '<option value="">Carregando...</option>';
+    try {
+      const data = await Api.get(`/clients/${clientId}`);
+      state.cnpjsByClient = state.cnpjsByClient || {};
+      state.cnpjsByClient[clientId] = data.cnpjs || [];
+      if (!state.cnpjsByClient[clientId].length) {
+        sel.innerHTML = '<option value="">Nenhum CNPJ cadastrado para este cliente</option>';
+        return;
+      }
+      sel.innerHTML = '<option value="">Não especificar</option>' +
+        state.cnpjsByClient[clientId].map((cn) => `<option value="${cn.id}">${cn.apelido ? escapeHtml(cn.apelido) + ' — ' : ''}${escapeHtml(cn.cnpj)}</option>`).join('');
+      if (selectedCnpjId) sel.value = selectedCnpjId;
+    } catch {
+      sel.innerHTML = '<option value="">Erro ao carregar CNPJs</option>';
+    }
+  }
+
+  async function openLicenseModal(licenseId) {
     state.editingLicenseId = licenseId || null;
     state.pendingDocument = null;
     state.pendingFile = null;
@@ -363,10 +417,12 @@
       $('#lic-lead').value = lic.renovacao_lead_days || 60;
       $('#lic-info').value = lic.info_adicional || '';
       $('#lic-auto-aviso').checked = !!lic.auto_enviar_aviso;
+      await updateLicCnpjOptions(lic.client_id, lic.cnpj_id);
     } else {
       $('#modal-licenca-titulo').textContent = 'Cadastrar licença';
       $('#lic-id').value = '';
       $('#lic-lead').value = 60;
+      await updateLicCnpjOptions('');
     }
     openModal('modal-licenca');
   }
@@ -430,7 +486,7 @@
     $('#lic-file-actions').style.display = 'none';
     try {
       const { extracted } = await Api.post('/extract-document', { base64, mediaType, filename });
-      applyExtractedFields(extracted);
+      await applyExtractedFields(extracted);
       $('#lic-upload-status').textContent = `✅ Campos lidos de "${filename}". Confira e ajuste antes de salvar.`;
     } catch (err) {
       $('#lic-file-actions').style.display = 'block';
@@ -439,7 +495,7 @@
     }
   }
 
-  function applyExtractedFields(extracted) {
+  async function applyExtractedFields(extracted) {
     if (!extracted) return;
     if (extracted.classe) $('#lic-classe').value = extracted.classe;
     if (extracted.descricao) $('#lic-descricao').value = extracted.descricao;
@@ -449,13 +505,26 @@
     if (extracted.validade) $('#lic-validade').value = extracted.validade;
     if (extracted.observacoes) $('#lic-info').value = extracted.observacoes;
 
+    let matchedClientId = null;
     if (extracted.cliente_nome) {
       const needle = extracted.cliente_nome.toLowerCase();
       const match = state.clients.find((c) => c.name.toLowerCase().includes(needle) || needle.includes(c.name.toLowerCase()));
       if (match) {
         $('#lic-cliente').value = match.id;
+        matchedClientId = match.id;
       } else {
         showToast(`IA identificou o cliente "${extracted.cliente_nome}", mas ele não foi encontrado na lista. Selecione manualmente.`, '');
+      }
+    }
+    if (!matchedClientId) matchedClientId = $('#lic-cliente').value || null;
+
+    if (matchedClientId) {
+      await updateLicCnpjOptions(matchedClientId);
+      if (extracted.cliente_cnpj) {
+        const digits = String(extracted.cliente_cnpj).replace(/\D/g, '');
+        const cnpjs = (state.cnpjsByClient && state.cnpjsByClient[matchedClientId]) || [];
+        const cnpjMatch = cnpjs.find((cn) => cn.cnpj.replace(/\D/g, '') === digits);
+        if (cnpjMatch) $('#lic-cnpj').value = cnpjMatch.id;
       }
     }
   }
@@ -470,6 +539,7 @@
 
     const body = {
       clientId: Number(clientId),
+      cnpjId: $('#lic-cnpj').value ? Number($('#lic-cnpj').value) : null,
       classe: $('#lic-classe').value || null,
       unidade: $('#lic-unidade').value || null,
       descricao,
@@ -765,6 +835,19 @@
         else renderClientesTable();
       } catch (err) { showToast(err.message, 'error'); }
     });
+    $('#btn-cnpj-cancelar').addEventListener('click', () => closeModal('modal-cnpj'));
+    $('#form-cnpj').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await Api.post(`/clients/${state.currentClientId}/cnpjs`, {
+          cnpj: $('#cnpj-valor').value.trim(),
+          apelido: $('#cnpj-apelido').value.trim() || null,
+        });
+        closeModal('modal-cnpj');
+        showToast('CNPJ adicionado.', 'success');
+        openClientDetail(state.currentClientId);
+      } catch (err) { showToast(err.message, 'error'); }
+    });
     $('#btn-contato-cancelar').addEventListener('click', () => closeModal('modal-contato'));
     $('#form-contato').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -785,6 +868,7 @@
     $('#btn-nova-licenca-manual').addEventListener('click', () => openLicenseModal(null));
     $('#btn-nova-licenca-ia').addEventListener('click', () => { openLicenseModal(null); setTimeout(() => $('#lic-upload-drop').click(), 50); });
     $('#btn-licenca-cancelar').addEventListener('click', () => closeModal('modal-licenca'));
+    $('#lic-cliente').addEventListener('change', () => updateLicCnpjOptions($('#lic-cliente').value));
     $('#lic-upload-drop').addEventListener('click', () => $('#lic-file-input').click());
     $('#lic-file-input').addEventListener('change', (e) => { if (e.target.files[0]) handleLicenseFileSelected(e.target.files[0]); });
     $('#btn-apenas-anexar').addEventListener('click', attachFileOnly);

@@ -17,6 +17,7 @@
     "postgres": "^3.4.4",
     "nodemailer": "^6.9.14",
     "node-cron": "^3.0.3",
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "@netlify/database": "^1.0.0"
   }
 }

@@ -232,10 +232,12 @@ app.get('/api/alerts', async (req, res) => {
 
     const sql = db();
     const rows = await sql`
-      SELECT l.id, l.client_id, l.classe, l.unidade, l.descricao, l.numero, l.orgao_expeditor,
+      SELECT l.id, l.client_id, l.cnpj_id, l.classe, l.unidade, l.descricao, l.numero, l.orgao_expeditor,
         l.responsavel, l.emissao, l.validade, l.renovacao_lead_days, l.status, l.info_adicional,
-        l.documento_nome, l.auto_enviar_aviso, c.name AS cliente_nome
+        l.documento_nome, l.auto_enviar_aviso, c.name AS cliente_nome,
+        cc.cnpj AS licenca_cnpj, cc.apelido AS licenca_cnpj_apelido
       FROM licenses l JOIN clients c ON c.id = l.client_id
+      LEFT JOIN client_cnpjs cc ON cc.id = l.cnpj_id
     `;
     const withAlerts = rows.map((r) => ({ ...r, ...computeAlert(r.validade, r.renovacao_lead_days) }));
 
@@ -307,14 +309,17 @@ app.get('/api/clients/:id', async (req, res) => {
     if (!clientRows[0]) return res.status(404).json({ error: 'Cliente nao encontrado' });
 
     const licenses = await sql`
-      SELECT id, client_id, classe, unidade, descricao, numero, orgao_expeditor, responsavel,
-        emissao, validade, renovacao_lead_days, status, info_adicional, documento_nome,
-        auto_enviar_aviso, created_at, updated_at
-      FROM licenses WHERE client_id = ${clientId} ORDER BY validade ASC NULLS LAST`;
+      SELECT l.id, l.client_id, l.cnpj_id, l.classe, l.unidade, l.descricao, l.numero, l.orgao_expeditor, l.responsavel,
+        l.emissao, l.validade, l.renovacao_lead_days, l.status, l.info_adicional, l.documento_nome,
+        l.auto_enviar_aviso, l.created_at, l.updated_at,
+        cc.cnpj AS licenca_cnpj, cc.apelido AS licenca_cnpj_apelido
+      FROM licenses l LEFT JOIN client_cnpjs cc ON cc.id = l.cnpj_id
+      WHERE l.client_id = ${clientId} ORDER BY l.validade ASC NULLS LAST`;
     const contacts = await sql`SELECT * FROM client_contacts WHERE client_id = ${clientId} ORDER BY id`;
     const required = await sql`SELECT * FROM client_required_licenses WHERE client_id = ${clientId} ORDER BY tipo`;
+    const cnpjs = await sql`SELECT * FROM client_cnpjs WHERE client_id = ${clientId} ORDER BY id`;
 
-    res.json({ client: clientRows[0], licenses, contacts, requiredLicenses: required });
+    res.json({ client: clientRows[0], licenses, contacts, requiredLicenses: required, cnpjs });
   } catch (err) {
     res.status(500).json({ error: 'Erro interno', details: String(err.message || err) });
   }
@@ -488,6 +493,87 @@ app.delete('/api/clients/:id/required-licenses/:rid', async (req, res) => {
 });
 
 // =====================================================================
+// ROTAS DE CNPJs DO CLIENTE (um cliente pode ter mais de um CNPJ)
+// =====================================================================
+
+// GET /api/clients/:id/cnpjs
+app.get('/api/clients/:id/cnpjs', async (req, res) => {
+  try {
+    const session = checkAuth(req, res);
+    if (!session) return;
+
+    const clientId = Number(req.params.id);
+    const sql = db();
+    const rows = await sql`SELECT * FROM client_cnpjs WHERE client_id = ${clientId} ORDER BY id`;
+    res.json({ cnpjs: rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno', details: String(err.message || err) });
+  }
+});
+
+// POST /api/clients/:id/cnpjs
+app.post('/api/clients/:id/cnpjs', async (req, res) => {
+  try {
+    const session = checkAuth(req, res);
+    if (!session) return;
+
+    const clientId = Number(req.params.id);
+    const { cnpj, apelido } = req.body || {};
+    if (!cnpj || !cnpj.trim()) return res.status(400).json({ error: 'Informe o CNPJ.' });
+
+    const sql = db();
+    const clientRows = await sql`SELECT id FROM clients WHERE id = ${clientId}`;
+    if (!clientRows[0]) return res.status(404).json({ error: 'Cliente nao encontrado' });
+
+    const rows = await sql`
+      INSERT INTO client_cnpjs (client_id, cnpj, apelido) VALUES (${clientId}, ${cnpj.trim()}, ${apelido || null}) RETURNING *`;
+    res.status(201).json({ cnpj: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno', details: String(err.message || err) });
+  }
+});
+
+// PUT /api/clients/:id/cnpjs/:cid
+app.put('/api/clients/:id/cnpjs/:cid', async (req, res) => {
+  try {
+    const session = checkAuth(req, res);
+    if (!session) return;
+
+    const clientId = Number(req.params.id);
+    const cnpjId = Number(req.params.cid);
+    const { cnpj, apelido } = req.body || {};
+
+    const sql = db();
+    const rows = await sql`
+      UPDATE client_cnpjs SET
+        cnpj = COALESCE(${cnpj && cnpj.trim() ? cnpj.trim() : null}, cnpj),
+        apelido = ${apelido !== undefined ? apelido : sql`apelido`}
+      WHERE id = ${cnpjId} AND client_id = ${clientId} RETURNING *`;
+    if (!rows[0]) return res.status(404).json({ error: 'CNPJ nao encontrado' });
+    res.json({ cnpj: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno', details: String(err.message || err) });
+  }
+});
+
+// DELETE /api/clients/:id/cnpjs/:cid
+app.delete('/api/clients/:id/cnpjs/:cid', async (req, res) => {
+  try {
+    const session = checkAuth(req, res);
+    if (!session) return;
+
+    const clientId = Number(req.params.id);
+    const cnpjId = Number(req.params.cid);
+    const sql = db();
+    // Licencas que apontavam para este CNPJ ficam sem CNPJ especifico (ON DELETE SET NULL cuida disso no banco).
+    await sql`DELETE FROM client_cnpjs WHERE id = ${cnpjId} AND client_id = ${clientId}`;
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno', details: String(err.message || err) });
+  }
+});
+
+// =====================================================================
 // ROTAS DE LICENCAS
 // =====================================================================
 
@@ -499,11 +585,13 @@ app.get('/api/licenses', async (req, res) => {
 
     const sql = db();
     const rows = await sql`
-      SELECT l.id, l.client_id, l.classe, l.unidade, l.descricao, l.numero, l.orgao_expeditor,
+      SELECT l.id, l.client_id, l.cnpj_id, l.classe, l.unidade, l.descricao, l.numero, l.orgao_expeditor,
         l.responsavel, l.emissao, l.validade, l.renovacao_lead_days, l.status, l.info_adicional,
         l.documento_nome, l.documento_mime, l.auto_enviar_aviso, l.created_at, l.updated_at,
-        c.name AS cliente_nome, c.cnpj AS cliente_cnpj
+        c.name AS cliente_nome, c.cnpj AS cliente_cnpj,
+        cc.cnpj AS licenca_cnpj, cc.apelido AS licenca_cnpj_apelido
       FROM licenses l JOIN clients c ON c.id = l.client_id
+      LEFT JOIN client_cnpjs cc ON cc.id = l.cnpj_id
       ORDER BY l.validade ASC NULLS LAST
     `;
 
@@ -543,15 +631,23 @@ app.post('/api/licenses', async (req, res) => {
     }
 
     const sql = db();
+
+    // Se um cnpjId foi informado, garante que ele pertence ao cliente selecionado.
+    let cnpjId = b.cnpjId ? Number(b.cnpjId) : null;
+    if (cnpjId) {
+      const cnpjCheck = await sql`SELECT id FROM client_cnpjs WHERE id = ${cnpjId} AND client_id = ${b.clientId}`;
+      if (!cnpjCheck[0]) cnpjId = null;
+    }
+
     const rows = await sql`
-      INSERT INTO licenses (client_id, classe, unidade, descricao, numero, orgao_expeditor, responsavel,
+      INSERT INTO licenses (client_id, cnpj_id, classe, unidade, descricao, numero, orgao_expeditor, responsavel,
         emissao, validade, renovacao_lead_days, info_adicional, documento_data, documento_mime,
         documento_nome, auto_enviar_aviso)
-      VALUES (${b.clientId}, ${b.classe || null}, ${b.unidade || null}, ${b.descricao}, ${b.numero || null},
+      VALUES (${b.clientId}, ${cnpjId}, ${b.classe || null}, ${b.unidade || null}, ${b.descricao}, ${b.numero || null},
         ${b.orgaoExpeditor || null}, ${b.responsavel || null}, ${b.emissao || null}, ${b.validade || null},
         ${b.renovacaoLeadDays || 60}, ${b.infoAdicional || null}, ${documentoData},
         ${documentoMime}, ${documentoNome}, ${!!b.autoEnviarAviso})
-      RETURNING id, client_id, classe, unidade, descricao, numero, orgao_expeditor, responsavel,
+      RETURNING id, client_id, cnpj_id, classe, unidade, descricao, numero, orgao_expeditor, responsavel,
         emissao, validade, renovacao_lead_days, status, info_adicional, documento_nome, documento_mime,
         auto_enviar_aviso, created_at, updated_at
     `;
@@ -570,11 +666,14 @@ app.get('/api/licenses/:id', async (req, res) => {
     const licenseId = Number(req.params.id);
     const sql = db();
     const rows = await sql`
-      SELECT l.id, l.client_id, l.classe, l.unidade, l.descricao, l.numero, l.orgao_expeditor,
+      SELECT l.id, l.client_id, l.cnpj_id, l.classe, l.unidade, l.descricao, l.numero, l.orgao_expeditor,
         l.responsavel, l.emissao, l.validade, l.renovacao_lead_days, l.status, l.info_adicional,
         l.documento_nome, l.documento_mime, l.auto_enviar_aviso, l.created_at, l.updated_at,
-        c.name AS cliente_nome, c.cnpj AS cliente_cnpj
-      FROM licenses l JOIN clients c ON c.id = l.client_id WHERE l.id = ${licenseId}
+        c.name AS cliente_nome, c.cnpj AS cliente_cnpj,
+        cc.cnpj AS licenca_cnpj, cc.apelido AS licenca_cnpj_apelido
+      FROM licenses l JOIN clients c ON c.id = l.client_id
+      LEFT JOIN client_cnpjs cc ON cc.id = l.cnpj_id
+      WHERE l.id = ${licenseId}
     `;
     if (!rows[0]) return res.status(404).json({ error: 'Licenca nao encontrada' });
     res.json({ license: withAlert(rows[0]) });
@@ -605,8 +704,22 @@ app.put('/api/licenses/:id', async (req, res) => {
       `;
     }
 
+    // cnpjId pode vir explicitamente como null (para "desvincular" o CNPJ) ou omitido (nao mexe).
+    let cnpjIdUpdate = undefined;
+    if (b.cnpjId !== undefined) {
+      if (b.cnpjId === null || b.cnpjId === '') {
+        cnpjIdUpdate = null;
+      } else {
+        const currentClientRows = await sql`SELECT client_id FROM licenses WHERE id = ${licenseId}`;
+        const targetClientId = b.clientId || (currentClientRows[0] && currentClientRows[0].client_id);
+        const cnpjCheck = await sql`SELECT id FROM client_cnpjs WHERE id = ${Number(b.cnpjId)} AND client_id = ${targetClientId}`;
+        cnpjIdUpdate = cnpjCheck[0] ? Number(b.cnpjId) : null;
+      }
+    }
+
     const rows = await sql`
       UPDATE licenses SET
+        cnpj_id = ${cnpjIdUpdate !== undefined ? cnpjIdUpdate : sql`cnpj_id`},
         classe = COALESCE(${b.classe !== undefined ? b.classe : null}, classe),
         unidade = COALESCE(${b.unidade !== undefined ? b.unidade : null}, unidade),
         descricao = COALESCE(${b.descricao || null}, descricao),
@@ -621,7 +734,7 @@ app.put('/api/licenses/:id', async (req, res) => {
         status = COALESCE(${b.status || null}, status),
         updated_at = NOW()
       WHERE id = ${licenseId}
-      RETURNING id, client_id, classe, unidade, descricao, numero, orgao_expeditor, responsavel,
+      RETURNING id, client_id, cnpj_id, classe, unidade, descricao, numero, orgao_expeditor, responsavel,
         emissao, validade, renovacao_lead_days, status, info_adicional, documento_nome, documento_mime,
         auto_enviar_aviso, created_at, updated_at
     `;

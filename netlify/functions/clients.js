@@ -37,10 +37,14 @@ exports.handler = async (event) => {
       if (method === 'GET') {
         const clientRows = await sql.sql`SELECT * FROM clients WHERE id = ${clientId}`;
         if (!clientRows[0]) return json(404, { error: 'Cliente nao encontrado' });
-        const licenses = await sql.sql`SELECT * FROM licenses WHERE client_id = ${clientId} ORDER BY validade ASC NULLS LAST`;
+        const licenses = await sql.sql`
+          SELECT l.*, cc.cnpj AS licenca_cnpj, cc.apelido AS licenca_cnpj_apelido
+          FROM licenses l LEFT JOIN client_cnpjs cc ON cc.id = l.cnpj_id
+          WHERE l.client_id = ${clientId} ORDER BY l.validade ASC NULLS LAST`;
         const contacts = await sql.sql`SELECT * FROM client_contacts WHERE client_id = ${clientId} ORDER BY id`;
         const required = await sql.sql`SELECT * FROM client_required_licenses WHERE client_id = ${clientId} ORDER BY tipo`;
-        return json(200, { client: clientRows[0], licenses, contacts, requiredLicenses: required });
+        const cnpjs = await sql.sql`SELECT * FROM client_cnpjs WHERE client_id = ${clientId} ORDER BY id`;
+        return json(200, { client: clientRows[0], licenses, contacts, requiredLicenses: required, cnpjs });
       }
       if (method === 'PUT') {
         const { name, cnpj, notes, status } = parseBody(event);
@@ -105,6 +109,42 @@ exports.handler = async (event) => {
         const reqId = Number(segments[2]);
         if (method === 'DELETE') {
           await sql.sql`DELETE FROM client_required_licenses WHERE id = ${reqId} AND client_id = ${clientId}`;
+          return json(200, { ok: true });
+        }
+      }
+      return json(405, { error: 'Metodo nao permitido' });
+    }
+
+    // /api/clients/:id/cnpjs[/:cnpjId]  (um cliente pode ter mais de um CNPJ, ex.: filiais)
+    if (segments[1] === 'cnpjs') {
+      if (segments.length === 2) {
+        if (method === 'GET') {
+          const rows = await sql.sql`SELECT * FROM client_cnpjs WHERE client_id = ${clientId} ORDER BY id`;
+          return json(200, { cnpjs: rows });
+        }
+        if (method === 'POST') {
+          const { cnpj, apelido } = parseBody(event);
+          if (!cnpj || !cnpj.trim()) return json(400, { error: 'Informe o CNPJ.' });
+          const clientCheck = await sql.sql`SELECT id FROM clients WHERE id = ${clientId}`;
+          if (!clientCheck[0]) return json(404, { error: 'Cliente nao encontrado' });
+          const rows = await sql.sql`INSERT INTO client_cnpjs (client_id, cnpj, apelido) VALUES (${clientId}, ${cnpj.trim()}, ${apelido || null}) RETURNING *`;
+          return json(201, { cnpj: rows[0] });
+        }
+      }
+      if (segments.length === 3) {
+        const cnpjId = Number(segments[2]);
+        if (method === 'PUT') {
+          const { cnpj, apelido } = parseBody(event);
+          const rows = await sql.sql`
+            UPDATE client_cnpjs SET
+              cnpj = COALESCE(${cnpj && cnpj.trim() ? cnpj.trim() : null}, cnpj),
+              apelido = ${apelido !== undefined ? apelido : sql.sql`apelido`}
+            WHERE id = ${cnpjId} AND client_id = ${clientId} RETURNING *`;
+          if (!rows[0]) return json(404, { error: 'CNPJ nao encontrado' });
+          return json(200, { cnpj: rows[0] });
+        }
+        if (method === 'DELETE') {
+          await sql.sql`DELETE FROM client_cnpjs WHERE id = ${cnpjId} AND client_id = ${clientId}`;
           return json(200, { ok: true });
         }
       }

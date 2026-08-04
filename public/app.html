@@ -191,8 +191,9 @@
       </div>
       <div class="field-row">
         <div class="field">
-          <label>CNPJ</label>
+          <label>CNPJ principal</label>
           <input type="text" id="cli-cnpj" placeholder="00.000.000/0000-00" />
+          <p class="muted" style="margin-top:4px;">Para cadastrar mais de um CNPJ, use a seção "CNPJs do cliente" na tela do cliente.</p>
         </div>
         <div class="field">
           <label>Status</label>
@@ -209,6 +210,26 @@
       <div class="modal-actions">
         <button type="button" class="btn-ghost" id="btn-cliente-cancelar">Cancelar</button>
         <button type="submit" class="btn-primary">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-cnpj">
+  <div class="modal">
+    <h3>Novo CNPJ do cliente</h3>
+    <form id="form-cnpj">
+      <div class="field">
+        <label>CNPJ *</label>
+        <input type="text" id="cnpj-valor" required placeholder="00.000.000/0000-00" />
+      </div>
+      <div class="field">
+        <label>Identificação (opcional)</label>
+        <input type="text" id="cnpj-apelido" placeholder="ex.: Matriz, Filial SP..." />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" id="btn-cnpj-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">Adicionar CNPJ</button>
       </div>
     </form>
   </div>
@@ -261,9 +282,17 @@
 
     <form id="form-licenca">
       <input type="hidden" id="lic-id" />
-      <div class="field">
-        <label>Cliente *</label>
-        <select id="lic-cliente" required></select>
+      <div class="field-row">
+        <div class="field">
+          <label>Cliente *</label>
+          <select id="lic-cliente" required></select>
+        </div>
+        <div class="field">
+          <label>CNPJ da licença</label>
+          <select id="lic-cnpj" disabled>
+            <option value="">Selecione o cliente primeiro</option>
+          </select>
+        </div>
       </div>
       <div class="field-row">
         <div class="field">
