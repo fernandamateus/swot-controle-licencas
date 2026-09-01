@@ -583,8 +583,9 @@
       } else {
         showToast('Licença salva com sucesso.', 'success');
       }
-    } catch (err) {
-      showLicError(err.message);
+       } catch (err) {
+      const detail = err.data && err.data.details;
+      showLicError(detail ? `${err.message}: ${detail}` : err.message);
     } finally {
       btn.disabled = false;
       btn.textContent = 'Salvar licença';
