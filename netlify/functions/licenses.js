@@ -3,9 +3,35 @@ const auth = require('../../lib/auth');
 const { json, parseBody, pathSegmentsAfter } = require('../../lib/http');
 const { computeAlert } = require('../../lib/license-utils');
 
+// Limite de tamanho do documento (bytes, ja decodificado do base64). As Netlify
+// Functions (AWS Lambda por baixo) tem um limite de payload de requisicao de ~6MB;
+// como o base64 infla o arquivo original em ~33% e ele viaja dentro de um JSON,
+// mantemos uma margem segura aqui para nunca deixar o corpo estourar esse limite
+// silenciosamente (o que antes fazia o anexo simplesmente nao ser salvo).
+const MAX_DOCUMENT_BYTES = 4 * 1024 * 1024; // 4MB
+
 function withAlert(row) {
   const alert = computeAlert(row.validade, row.renovacao_lead_days);
   return { ...row, ...alert };
+}
+
+function decodeDocumento(b) {
+  if (!b.documentoBase64 || !b.documentoNomeOriginal) return { documentoData: null, documentoMime: null, documentoNome: null };
+  const documentoData = Buffer.from(b.documentoBase64, 'base64');
+  if (documentoData.length > MAX_DOCUMENT_BYTES) {
+    const mb = (documentoData.length / (1024 * 1024)).toFixed(1);
+    const err = new Error(
+      `O arquivo "${b.documentoNomeOriginal}" tem ${mb}MB, acima do limite de ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB por anexo. ` +
+      `Reduza a qualidade do PDF/scan (ou envie como imagem comprimida) e tente novamente.`
+    );
+    err.statusCode = 413;
+    throw err;
+  }
+  // Sem o MIME informado pelo front-end, cai para octet-stream (o navegador acaba
+  // baixando o arquivo em vez de abrir o PDF inline). O front-end agora sempre
+  // envia documentoMime, mas mantemos esse fallback por seguranca.
+  const documentoMime = b.documentoMime || 'application/octet-stream';
+  return { documentoData, documentoMime, documentoNome: b.documentoNomeOriginal };
 }
 
 exports.handler = async (event) => {
@@ -44,17 +70,10 @@ exports.handler = async (event) => {
         return json(200, { licenses: result });
       }
       if (method === 'POST') {
-        const b = parseBody(event);
+        const b = parseBody(event, { strict: true });
         if (!b.clientId || !b.descricao) return json(400, { error: 'Informe ao menos cliente e descricao do documento.' });
 
-        let documentoData = null;
-        let documentoMime = null;
-        let documentoNome = null;
-        if (b.documentoBase64 && b.documentoNomeOriginal) {
-          documentoData = Buffer.from(b.documentoBase64, 'base64');
-          documentoMime = b.documentoMime || 'application/octet-stream';
-          documentoNome = b.documentoNomeOriginal;
-        }
+        const { documentoData, documentoMime, documentoNome } = decodeDocumento(b);
 
         // Se um cnpjId foi informado, garante que ele pertence ao cliente selecionado.
         let cnpjId = b.cnpjId ? Number(b.cnpjId) : null;
@@ -99,15 +118,14 @@ exports.handler = async (event) => {
         return json(200, { license: withAlert(rows[0]) });
       }
       if (method === 'PUT') {
-        const b = parseBody(event);
+        const b = parseBody(event, { strict: true });
 
-        if (b.documentoBase64 && b.documentoNomeOriginal) {
-          const documentoData = Buffer.from(b.documentoBase64, 'base64');
-          const documentoMime = b.documentoMime || 'application/octet-stream';
+        const { documentoData, documentoMime, documentoNome } = decodeDocumento(b);
+        if (documentoData) {
           await sql.sql`
             UPDATE licenses SET
               documento_data = ${documentoData}, documento_mime = ${documentoMime},
-              documento_nome = ${b.documentoNomeOriginal}, updated_at = NOW()
+              documento_nome = ${documentoNome}, updated_at = NOW()
             WHERE id = ${licenseId}
           `;
         }
@@ -173,6 +191,7 @@ exports.handler = async (event) => {
 
     return json(404, { error: 'Rota nao encontrada' });
   } catch (err) {
-    return json(500, { error: 'Erro interno', details: String(err && err.message || err) });
+    const statusCode = (err && err.statusCode) || 500;
+    return json(statusCode, { error: statusCode === 500 ? 'Erro interno' : err.message, details: String(err && err.message || err) });
   }
 };
