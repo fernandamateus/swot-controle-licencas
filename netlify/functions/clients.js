@@ -48,7 +48,7 @@ exports.handler = async (event) => {
       }
       if (method === 'PUT') {
         const { name, cnpj, notes, status } = parseBody(event);
-        const rows = await sql.sql`UPDATE clients SET name = COALESCE(${name}, name), cnpj = ${cnpj}, notes = ${notes}, status = COALESCE(${status}, status), updated_at = NOW() WHERE id = ${clientId} RETURNING *`;
+        const rows = await sql.sql`UPDATE clients SET name = COALESCE(${name ?? null}, name), cnpj = ${cnpj ?? null}, notes = ${notes ?? null}, status = COALESCE(${status ?? null}, status), updated_at = NOW() WHERE id = ${clientId} RETURNING *`;
         if (!rows[0]) return json(404, { error: 'Cliente nao encontrado' });
         return json(200, { client: rows[0] });
       }
