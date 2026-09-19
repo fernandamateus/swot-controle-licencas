@@ -427,11 +427,18 @@
     openModal('modal-licenca');
   }
 
+  const MAX_ANEXO_BYTES = 4 * 1024 * 1024; // 4MB — mesmo limite aplicado no backend (netlify/functions/licenses.js)
+
   async function handleLicenseFileSelected(file) {
     const mediaMap = { 'application/pdf': 'application/pdf', 'image/png': 'image/png', 'image/jpeg': 'image/jpeg', 'image/webp': 'image/webp' };
     const mediaType = mediaMap[file.type];
     if (!mediaType) {
       showToast('Formato não suportado. Envie PDF, PNG, JPG ou WEBP.', 'error');
+      return;
+    }
+    if (file.size > MAX_ANEXO_BYTES) {
+      const mb = (file.size / (1024 * 1024)).toFixed(1);
+      showToast(`Arquivo de ${mb}MB excede o limite de 4MB por anexo. Reduza a qualidade do PDF/scan e tente novamente.`, 'error');
       return;
     }
     const base64 = await fileToBase64(file);
@@ -555,6 +562,7 @@
     if (state.pendingDocument) {
       body.documentoBase64 = state.pendingDocument.base64;
       body.documentoNomeOriginal = state.pendingDocument.filename;
+      body.documentoMime = state.pendingDocument.mediaType;
     }
 
     const btn = $('#btn-licenca-salvar');
@@ -872,6 +880,15 @@
     $('#lic-cliente').addEventListener('change', () => updateLicCnpjOptions($('#lic-cliente').value));
     $('#lic-upload-drop').addEventListener('click', () => $('#lic-file-input').click());
     $('#lic-file-input').addEventListener('change', (e) => { if (e.target.files[0]) handleLicenseFileSelected(e.target.files[0]); });
+    // "Arraste aqui" — o texto ja prometia isso, mas faltavam os listeners de drag&drop.
+    $('#lic-upload-drop').addEventListener('dragover', (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); });
+    $('#lic-upload-drop').addEventListener('dragleave', (e) => { e.currentTarget.classList.remove('drag-over'); });
+    $('#lic-upload-drop').addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over');
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) handleLicenseFileSelected(file);
+    });
     $('#btn-apenas-anexar').addEventListener('click', attachFileOnly);
     $('#btn-ler-campos').addEventListener('click', extractDocumentFree);
     $('#btn-preview-arquivo').addEventListener('click', previewArquivoSelecionado);
